@@ -77,7 +77,7 @@ internal class CameraEffectApplier : IAffinity, IDisposable
     }
 
     [AffinityPrefix]
-    [AffinityPatch(typeof(MainEffectController), nameof(MainEffectController.OnPreRender))]
+    [AffinityPatch(typeof(MainEffectController), "get_renderData")]
     private void ApplyVivifyEffect(MainEffectController __instance)
     {
         if (_postProcessingControllers.TryGetValue(__instance, out PostProcessingController? postProcessingController))

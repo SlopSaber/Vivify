@@ -16,8 +16,6 @@ internal class AddComponentsToCamera : IAffinity
 
     private readonly List<Component> _injected = [];
 
-    private readonly Dictionary<ImageEffectController, PostProcessingController> _postProcessingControllers = new();
-
     [UsedImplicitly]
     private AddComponentsToCamera(SiraLog log, DiContainer container)
     {
@@ -26,7 +24,7 @@ internal class AddComponentsToCamera : IAffinity
     }
 
     [AffinityPostfix]
-    [AffinityPatch(typeof(MainEffectController), nameof(MainEffectController.LazySetupImageEffectController))]
+    [AffinityPatch(typeof(MainEffectController), "get_container")]
     private void AddComponents(MainEffectController __instance)
     {
         GameObject gameObject = __instance.gameObject;
@@ -35,46 +33,6 @@ internal class AddComponentsToCamera : IAffinity
 #endif
         SafeAddComponent<PostProcessingController>(gameObject);
         SafeAddComponent<CameraPropertyController>(gameObject);
-    }
-
-    [AffinityPostfix]
-    [AffinityPatch(typeof(MirrorRendererSO), nameof(MirrorRendererSO.CreateOrUpdateMirrorCamera))]
-    private void AddMirrorComponents(MirrorRendererSO __instance)
-    {
-        GameObject gameObject = __instance._mirrorCamera.gameObject;
-#if !V1_29_1
-        SafeAddComponent<MultipassKeywordController>(gameObject);
-#endif
-        SafeAddComponent<CullingCameraController>(gameObject);
-        SafeAddComponent<CameraPropertyController>(gameObject);
-    }
-
-    [AffinityPrefix]
-    [AffinityPatch(typeof(ImageEffectController), nameof(ImageEffectController.OnRenderImage))]
-    private bool StopRenderImage(ImageEffectController __instance, RenderTexture src, RenderTexture dest)
-    {
-        if (!_postProcessingControllers.TryGetValue(
-                __instance,
-                out PostProcessingController? postProcessingController))
-        {
-            postProcessingController = __instance.GetComponent<PostProcessingController>();
-            if (postProcessingController != null)
-            {
-                _postProcessingControllers[__instance] = postProcessingController;
-            }
-            else
-            {
-                return true;
-            }
-        }
-
-        if (!postProcessingController.enabled)
-        {
-            return true;
-        }
-
-        Graphics.Blit(src, dest);
-        return false;
     }
 
     private void SafeAddComponent<T>(GameObject gameObject)

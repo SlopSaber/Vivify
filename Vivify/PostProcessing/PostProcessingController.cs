@@ -30,7 +30,6 @@ internal class PostProcessingController : CullingCameraController
     private SiraLog _log = null!;
     private IInstantiator _instantiator = null!;
 
-    private ImageEffectController _imageEffectController = null!;
     private RenderTextureDescriptor? _cachedMainDescriptor;
 
     internal Dictionary<string, CreateCameraData> CameraDatas { get; set; } = new();
@@ -168,15 +167,6 @@ internal class PostProcessingController : CullingCameraController
         CreateDeclaredTextures(descriptor);
         RenderTexture temp = RenderTexture.GetTemporary(descriptor);
         Graphics.ExecuteCommandBuffer(RenderImage(descriptor, src, temp, Effects[PostProcessingOrder.BeforeMainEffect]));
-
-        ImageEffectController.RenderImageCallback? callback = _imageEffectController._renderImageCallback;
-        if (callback != null && _imageEffectController.isActiveAndEnabled)
-        {
-            RenderTexture temp2 = RenderTexture.GetTemporary(descriptor);
-            callback(temp, temp2);
-            RenderTexture.ReleaseTemporary(temp);
-            temp = temp2;
-        }
 
         Graphics.ExecuteCommandBuffer(RenderImage(descriptor, temp, dst, Effects[PostProcessingOrder.AfterMainEffect]));
         RenderTexture.ReleaseTemporary(temp);
@@ -488,8 +478,6 @@ internal class PostProcessingController : CullingCameraController
 
     private void Awake()
     {
-        _imageEffectController = GetComponent<ImageEffectController>();
-
         foreach (PostProcessingOrder key in Enum.GetValues(typeof(PostProcessingOrder)))
         {
             if (!Effects.ContainsKey(key))

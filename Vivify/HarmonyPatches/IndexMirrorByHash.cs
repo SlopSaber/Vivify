@@ -5,6 +5,7 @@ using HarmonyLib;
 using Heck;
 using UnityEngine;
 
+#if false
 namespace Vivify.HarmonyPatches;
 
 [HeckPatch(PatchType.Features)]
@@ -38,3 +39,4 @@ internal static class IndexMirrorByHash
             .InstructionEnumeration();
     }
 }
+#endif
