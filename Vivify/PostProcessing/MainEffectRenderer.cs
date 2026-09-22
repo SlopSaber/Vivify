@@ -6,7 +6,9 @@ namespace Vivify.PostProcessing;
 // This class allows anyone to apply effects to any render texture
 internal class MainEffectRenderer
 {
-    internal MainEffectRenderer(MainEffectController mainEffectController) { }
+    internal MainEffectRenderer(MainEffectController mainEffectController)
+    {
+    }
 
     internal void Render(RenderTexture src, RenderTexture dest)
     {
