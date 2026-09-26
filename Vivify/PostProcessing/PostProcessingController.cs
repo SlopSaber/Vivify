@@ -105,6 +105,7 @@ internal class PostProcessingController : CullingCameraController
                 if (renderTexture != null)
                 {
                     renderTexture.Release();
+                    Destroy(renderTexture);
                 }
             }
 
@@ -166,10 +167,22 @@ internal class PostProcessingController : CullingCameraController
         _cachedMainDescriptor = descriptor;
         CreateDeclaredTextures(descriptor);
         RenderTexture temp = RenderTexture.GetTemporary(descriptor);
-        Graphics.ExecuteCommandBuffer(RenderImage(descriptor, src, temp, Effects[PostProcessingOrder.BeforeMainEffect]));
+        try
+        {
+            using (CommandBuffer before = RenderImage(descriptor, src, temp, Effects[PostProcessingOrder.BeforeMainEffect]))
+            {
+                Graphics.ExecuteCommandBuffer(before);
+            }
 
-        Graphics.ExecuteCommandBuffer(RenderImage(descriptor, temp, dst, Effects[PostProcessingOrder.AfterMainEffect]));
-        RenderTexture.ReleaseTemporary(temp);
+            using (CommandBuffer after = RenderImage(descriptor, temp, dst, Effects[PostProcessingOrder.AfterMainEffect]))
+            {
+                Graphics.ExecuteCommandBuffer(after);
+            }
+        }
+        finally
+        {
+            RenderTexture.ReleaseTemporary(temp);
+        }
     }
 
     private void OnPreRender()
@@ -494,6 +507,7 @@ internal class PostProcessingController : CullingCameraController
             if (texture != null)
             {
                 texture.Release();
+                Destroy(texture);
             }
         }
 

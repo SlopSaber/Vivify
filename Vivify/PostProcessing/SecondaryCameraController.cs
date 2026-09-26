@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using HarmonyLib;
 using JetBrains.Annotations;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -131,9 +130,19 @@ internal class SecondaryCameraController : CullingCameraController
 
     private void OnDestroy()
     {
-        RenderTextures.Values.Do(n => n.Release());
+        foreach (RenderTexture texture in RenderTextures.Values)
+        {
+            texture.Release();
+            Destroy(texture);
+        }
+
         RenderTextures.Clear();
-        RenderTexturesDepth.Values.Do(n => n.Release());
+        foreach (RenderTexture texture in RenderTexturesDepth.Values)
+        {
+            texture.Release();
+            Destroy(texture);
+        }
+
         RenderTexturesDepth.Clear();
     }
 
@@ -216,7 +225,11 @@ internal class SecondaryCameraController : CullingCameraController
             if (!dictionary.TryGetValue(stereoActiveEye, out RenderTexture renderTexture) ||
                 !RTEquals(renderTexture, src))
             {
-                renderTexture?.Release();
+                if (renderTexture != null)
+                {
+                    renderTexture.Release();
+                    Destroy(renderTexture);
+                }
 
                 if (depth)
                 {
