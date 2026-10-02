@@ -52,6 +52,9 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
     private bool _downloadStarted;
     private bool _retired;
     private Task? _pendingPreparation;
+    private Coroutine? _downloadCoroutine;
+    private WebRequestScope? _apiScope;
+    private WebRequestScope? _bundleScope;
 
     [UIComponent("error")]
     private VerticalLayoutGroup _error = null!;
@@ -183,7 +186,9 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
         _newView = View.Downloading;
         string url = _config.BundleRepository + checksum;
         _log.Debug($"Fetching asset bundle info from [{url}]");
-        using UnityWebRequest apiRequest = UnityWebRequest.Get(url);
+        using WebRequestScope apiScope = new(UnityWebRequest.Get(url));
+        _apiScope = apiScope;
+        UnityWebRequest apiRequest = apiScope.Request;
         apiRequest.SendWebRequest();
 
         while (!apiRequest.isDone)
@@ -249,7 +254,9 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
 
         string downloadUrl = parsed.Value;
         _log.Debug($"Attempting to download asset bundle from [{downloadUrl}]");
-        using UnityWebRequest www = UnityWebRequest.Get(downloadUrl);
+        using WebRequestScope bundleScope = new(UnityWebRequest.Get(downloadUrl));
+        _bundleScope = bundleScope;
+        UnityWebRequest www = bundleScope.Request;
         www.SendWebRequest();
         while (!www.isDone)
         {
@@ -445,7 +452,8 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
         }
 
         _downloadStarted = true;
-        _assetDownloader.StartCoroutine(DownloadAndSave(path, checksum, _downloadRevision, _downloadCancellation.Token));
+        _downloadCoroutine =
+            _assetDownloader.StartCoroutine(DownloadAndSave(path, checksum, _downloadRevision, _downloadCancellation.Token));
     }
 
     private void RetireDownload()
@@ -455,11 +463,22 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
         _downloadCancellation?.Cancel();
         _downloadCancellation?.Dispose();
         _downloadCancellation = null;
+        if (_downloadCoroutine != null && _assetDownloader != null)
+        {
+            _assetDownloader.StopCoroutine(_downloadCoroutine);
+        }
+
+        _downloadCoroutine = null;
         if (_downloadWaiter != null && _assetDownloader != null)
         {
             _assetDownloader.StopCoroutine(_downloadWaiter);
-            _downloadWaiter = null;
         }
+
+        _downloadWaiter = null;
+        _apiScope?.Dispose();
+        _apiScope = null;
+        _bundleScope?.Dispose();
+        _bundleScope = null;
     }
 
     private IEnumerator WaitForDownload(int revision)
@@ -481,4 +500,34 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
     }
 
     internal class AssetDownloader : MonoBehaviour;
+
+    private sealed class WebRequestScope : IDisposable
+    {
+        private bool _disposed;
+
+        internal WebRequestScope(UnityWebRequest request)
+        {
+            Request = request;
+        }
+
+        internal UnityWebRequest Request { get; }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            try
+            {
+                Request.Abort();
+            }
+            finally
+            {
+                Request.Dispose();
+            }
+        }
+    }
 }

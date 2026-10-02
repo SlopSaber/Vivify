@@ -119,13 +119,20 @@ internal class DepthShaderManager : IInitializable, IDisposable
         {
             if (bundle != null)
             {
+                try
+                {
 #if LATEST
-                await bundle.UnloadAsync(!published);
+                    await bundle.UnloadAsync(!published);
 #elif V1_29_1
-                bundle.Unload(!published);
+                    bundle.Unload(!published);
 #else
-                bundle.UnloadAsync(!published);
+                    bundle.UnloadAsync(!published);
 #endif
+                }
+                catch (Exception error)
+                {
+                    Plugin.Log.Error(error);
+                }
             }
         }
     }
