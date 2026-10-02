@@ -76,6 +76,14 @@ internal class DepthShaderManager : IInitializable, IDisposable
         return await taskCompletionSource.Task;
     }
 
+    private static byte[] ReadResourceBytes()
+    {
+        using Stream stream = typeof(DepthShaderManager).Assembly.GetManifestResourceStream(PATH)!;
+        using MemoryStream memoryStream = new();
+        stream.CopyTo(memoryStream);
+        return memoryStream.ToArray();
+    }
+
     private async Task Load()
     {
         AssetBundle? bundle = null;
@@ -137,11 +145,4 @@ internal class DepthShaderManager : IInitializable, IDisposable
         }
     }
 
-    private static byte[] ReadResourceBytes()
-    {
-        using Stream stream = typeof(DepthShaderManager).Assembly.GetManifestResourceStream(PATH)!;
-        using MemoryStream memoryStream = new();
-        stream.CopyTo(memoryStream);
-        return memoryStream.ToArray();
-    }
 }

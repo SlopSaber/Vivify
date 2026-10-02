@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -164,6 +164,19 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
         }
 
         return true;
+    }
+
+    protected override void OnDestroy()
+    {
+        _retired = true;
+        try
+        {
+            RetireDownload();
+        }
+        finally
+        {
+            base.OnDestroy();
+        }
     }
 
     [UsedImplicitly]
@@ -424,19 +437,6 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
         _loadingBar.fillAmount = _downloadProgress;
         float percentage = _downloadProgress * 100;
         _percentageText.text = $"{percentage:0.0}%";
-    }
-
-    protected override void OnDestroy()
-    {
-        _retired = true;
-        try
-        {
-            RetireDownload();
-        }
-        finally
-        {
-            base.OnDestroy();
-        }
     }
 
     private bool IsCurrentDownload(int revision, CancellationToken cancellationToken)
