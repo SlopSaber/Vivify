@@ -3,6 +3,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.ExceptionServices;
+using System.Threading;
+using System.Threading.Tasks;
 using BeatSaberMarkupLanguage.Attributes;
 using BeatSaberMarkupLanguage.ViewControllers;
 using CustomJSONData.CustomBeatmap;
@@ -14,6 +17,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
+using Vivify.Managers;
 using Zenject;
 using static Vivify.VivifyController;
 #if !PRE_V1_37_1
@@ -43,6 +47,11 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
     private string? _downloadPath;
     private float _downloadProgress;
     private Coroutine? _downloadWaiter;
+    private CancellationTokenSource? _downloadCancellation;
+    private int _downloadRevision;
+    private bool _downloadStarted;
+    private bool _retired;
+    private Task? _pendingPreparation;
 
     [UIComponent("error")]
     private VerticalLayoutGroup _error = null!;
@@ -76,6 +85,10 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
 
     public bool Init(StartStandardLevelParameters standardLevelParameters)
     {
+        RetireDownload();
+        _downloadPath = null;
+        _downloadFinished = false;
+        _downloadStarted = false;
 #if !PRE_V1_37_1
         if (standardLevelParameters.BeatmapLevel.previewMediaData is not FileSystemPreviewMediaData fileSystemPreviewMediaData)
         {
@@ -135,12 +148,10 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
             uint checksum = assetBundleChecksum.Value;
             _doAbort = false;
             _downloadFinished = false;
+            _downloadCancellation = new CancellationTokenSource();
             if (_config.AllowDownload)
             {
-                _assetDownloader.StartCoroutine(
-                    DownloadAndSave(
-                        path,
-                        checksum));
+                StartDownload(path, checksum);
             }
             else
             {
@@ -165,7 +176,9 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
     // TODO: figure out a way to resolve the fact that multiplayer does NOT have enough time to download bundles
     private IEnumerator DownloadAndSave(
         string savePath,
-        uint checksum)
+        uint checksum,
+        int revision,
+        CancellationToken cancellationToken)
     {
         _newView = View.Downloading;
         string url = _config.BundleRepository + checksum;
@@ -175,7 +188,7 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
 
         while (!apiRequest.isDone)
         {
-            if (!_doAbort)
+            if (IsCurrentDownload(revision, cancellationToken))
             {
                 yield return null;
                 continue;
@@ -183,6 +196,11 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
 
             apiRequest.Abort();
             _log.Debug("Fetch cancelled");
+            yield break;
+        }
+
+        if (!IsCurrentDownload(revision, cancellationToken))
+        {
             yield break;
         }
 
@@ -204,14 +222,38 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
         }
 #pragma warning restore CS0618
 
-        RepoJson repoJson = JsonUtility.FromJson<RepoJson>(apiRequest.downloadHandler.text);
-        string downloadUrl = repoJson.downloadUrl;
+        Task<BundlePreparationWorker.Result<string>> parse =
+            BundlePreparationWorker.ParseDownloadUrl(apiRequest.downloadHandler.text, cancellationToken);
+        _pendingPreparation = parse;
+        while (!parse.IsCompleted)
+        {
+            if (!IsCurrentDownload(revision, cancellationToken))
+            {
+                yield break;
+            }
+
+            yield return null;
+        }
+
+        if (!IsCurrentDownload(revision, cancellationToken))
+        {
+            yield break;
+        }
+
+        BundlePreparationWorker.Result<string> parsed = parse.GetAwaiter().GetResult();
+        _pendingPreparation = null;
+        if (parsed.Error != null)
+        {
+            ExceptionDispatchInfo.Capture(parsed.Error).Throw();
+        }
+
+        string downloadUrl = parsed.Value;
         _log.Debug($"Attempting to download asset bundle from [{downloadUrl}]");
         using UnityWebRequest www = UnityWebRequest.Get(downloadUrl);
         www.SendWebRequest();
         while (!www.isDone)
         {
-            if (!_doAbort)
+            if (IsCurrentDownload(revision, cancellationToken))
             {
                 _downloadProgress = www.downloadProgress;
                 yield return null;
@@ -220,6 +262,11 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
 
             www.Abort();
             _log.Debug("Download cancelled");
+            yield break;
+        }
+
+        if (!IsCurrentDownload(revision, cancellationToken))
+        {
             yield break;
         }
 
@@ -242,7 +289,31 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
 #pragma warning restore CS0618
 
         _downloadProgress = 1;
-        File.WriteAllBytes(savePath, www.downloadHandler.data);
+        Task<BundlePreparationWorker.Result<bool>> write =
+            BundlePreparationWorker.Save(savePath, www.downloadHandler.data, cancellationToken);
+        _pendingPreparation = write;
+        while (!write.IsCompleted)
+        {
+            if (!IsCurrentDownload(revision, cancellationToken))
+            {
+                yield break;
+            }
+
+            yield return null;
+        }
+
+        if (!IsCurrentDownload(revision, cancellationToken))
+        {
+            yield break;
+        }
+
+        BundlePreparationWorker.Result<bool> written = write.GetAwaiter().GetResult();
+        _pendingPreparation = null;
+        if (written.Error != null)
+        {
+            ExceptionDispatchInfo.Capture(written.Error).Throw();
+        }
+
         _log.Debug($"Successfully downloaded bundle to [{savePath}]");
         _downloadFinished = true;
     }
@@ -254,21 +325,14 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
         _config.AllowDownload = true;
         if (_downloadPath != null)
         {
-            _assetDownloader.StartCoroutine(
-                DownloadAndSave(
-                    _downloadPath,
-                    _downloadChecksum));
+            StartDownload(_downloadPath, _downloadChecksum);
         }
     }
 
     [UsedImplicitly]
     private void OnEarlyDismiss()
     {
-        _doAbort = true;
-        if (_downloadWaiter != null)
-        {
-            _assetDownloader.StopCoroutine(_downloadWaiter);
-        }
+        RetireDownload();
     }
 
     [UsedImplicitly]
@@ -276,9 +340,14 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
     {
         if (!_downloadFinished)
         {
-            _assetDownloader.StartCoroutine(WaitForDownload());
+            if (_downloadWaiter != null)
+            {
+                _assetDownloader.StopCoroutine(_downloadWaiter);
+            }
+
+            _downloadWaiter = _assetDownloader.StartCoroutine(WaitForDownload(_downloadRevision));
         }
-        else
+        else if (!_retired && !_doAbort)
         {
             Finished?.Invoke();
         }
@@ -309,6 +378,11 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
 
     private void Update()
     {
+        if (_pendingPreparation?.IsCompleted == true)
+        {
+            _pendingPreparation = null;
+        }
+
         if (_currentView != _newView)
         {
             _currentView = _newView;
@@ -345,28 +419,66 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
         _percentageText.text = $"{percentage:0.0}%";
     }
 
-    private IEnumerator WaitForDownload()
+    protected override void OnDestroy()
+    {
+        _retired = true;
+        try
+        {
+            RetireDownload();
+        }
+        finally
+        {
+            base.OnDestroy();
+        }
+    }
+
+    private bool IsCurrentDownload(int revision, CancellationToken cancellationToken)
+    {
+        return !_retired && !_doAbort && revision == _downloadRevision && !cancellationToken.IsCancellationRequested;
+    }
+
+    private void StartDownload(string path, uint checksum)
+    {
+        if (_downloadStarted || _retired || _downloadCancellation == null)
+        {
+            return;
+        }
+
+        _downloadStarted = true;
+        _assetDownloader.StartCoroutine(DownloadAndSave(path, checksum, _downloadRevision, _downloadCancellation.Token));
+    }
+
+    private void RetireDownload()
+    {
+        _doAbort = true;
+        _downloadRevision++;
+        _downloadCancellation?.Cancel();
+        _downloadCancellation?.Dispose();
+        _downloadCancellation = null;
+        if (_downloadWaiter != null && _assetDownloader != null)
+        {
+            _assetDownloader.StopCoroutine(_downloadWaiter);
+            _downloadWaiter = null;
+        }
+    }
+
+    private IEnumerator WaitForDownload(int revision)
     {
         while (!_downloadFinished)
         {
+            if (_retired || _doAbort || revision != _downloadRevision)
+            {
+                yield break;
+            }
+
             yield return null;
         }
 
-        Finished?.Invoke();
+        if (!_retired && !_doAbort && revision == _downloadRevision)
+        {
+            Finished?.Invoke();
+        }
     }
 
     internal class AssetDownloader : MonoBehaviour;
-
-    [Serializable]
-    private class RepoJson
-    {
-        // might be ugly, but damn is it fast
-#pragma warning disable SA1401
-#pragma warning disable SA1307
-#pragma warning disable CS8618
-        public string downloadUrl;
-#pragma warning restore CS8618
-#pragma warning restore SA1307
-#pragma warning restore SA1401
-    }
 }

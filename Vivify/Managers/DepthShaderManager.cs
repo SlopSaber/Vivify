@@ -1,13 +1,19 @@
-﻿using System.IO;
+using System;
+using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using Zenject;
+using Object = UnityEngine.Object;
 
 namespace Vivify.Managers;
 
-internal class DepthShaderManager : IInitializable
+internal class DepthShaderManager : IInitializable, IDisposable
 {
     private const string PATH = "Vivify.Resources.DepthBlit";
+
+    private Task? _loading;
+    private bool _disposed;
 
     internal Material? DepthArrayMaterial { get; private set; }
 
@@ -15,7 +21,33 @@ internal class DepthShaderManager : IInitializable
 
     public void Initialize()
     {
-        _ = Load();
+        if (_disposed || _loading != null)
+        {
+            return;
+        }
+
+        if (SynchronizationContext.Current == null)
+        {
+            throw new InvalidOperationException("Depth shaders must be initialized on the Unity owner context.");
+        }
+
+        _loading = Load();
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        if (DepthMaterial != null)
+        {
+            Object.Destroy(DepthMaterial);
+            DepthMaterial = null;
+        }
+
+        if (DepthArrayMaterial != null)
+        {
+            Object.Destroy(DepthArrayMaterial);
+            DepthArrayMaterial = null;
+        }
     }
 
     // shamelessly stolen from AssetBundleLoadingTools
@@ -46,37 +78,63 @@ internal class DepthShaderManager : IInitializable
 
     private async Task Load()
     {
-        byte[] bytes;
-
-        using (Stream stream = typeof(DepthShaderManager).Assembly.GetManifestResourceStream(PATH)!)
-        using (MemoryStream memoryStream = new())
+        AssetBundle? bundle = null;
+        bool published = false;
+        try
         {
-            await stream.CopyToAsync(memoryStream);
-            bytes = memoryStream.ToArray();
-        }
+            byte[] bytes = await Task.Run(ReadResourceBytes);
+            if (_disposed)
+            {
+                return;
+            }
 
 #if V1_29_1
-        const uint crc = 1355036397;
+            const uint crc = 1355036397;
 #else
-        const uint crc = 1746663828;
+            const uint crc = 1746663828;
 #endif
-        AssetBundle? bundle = await LoadFromMemoryAsync(bytes, crc);
-        if (bundle == null)
-        {
-            return;
-        }
+            bundle = await LoadFromMemoryAsync(bytes, crc);
+            if (bundle == null || _disposed)
+            {
+                return;
+            }
 
-        Task getDepthBlit = LoadAssetAsync<Material>(bundle, "assets/depthblit.mat")
-            .ContinueWith(n => DepthMaterial = n.Result);
-        Task getDepthBlitArraySlice = LoadAssetAsync<Material>(bundle, "assets/depthblitarrayslice.mat")
-            .ContinueWith(n => DepthArrayMaterial = n.Result);
-        await Task.WhenAll(getDepthBlit, getDepthBlitArraySlice);
+            Task<Material?> depth = LoadAssetAsync<Material>(bundle, "assets/depthblit.mat");
+            Task<Material?> array = LoadAssetAsync<Material>(bundle, "assets/depthblitarrayslice.mat");
+            await Task.WhenAll(depth, array);
+            if (_disposed)
+            {
+                return;
+            }
+
+            DepthMaterial = depth.GetAwaiter().GetResult();
+            DepthArrayMaterial = array.GetAwaiter().GetResult();
+            published = true;
+        }
+        catch (Exception error)
+        {
+            Plugin.Log.Error(error);
+        }
+        finally
+        {
+            if (bundle != null)
+            {
 #if LATEST
-        await bundle.UnloadAsync(false);
+                await bundle.UnloadAsync(!published);
 #elif V1_29_1
-        bundle.Unload(false);
+                bundle.Unload(!published);
 #else
-        bundle.UnloadAsync(false);
+                bundle.UnloadAsync(!published);
 #endif
+            }
+        }
+    }
+
+    private static byte[] ReadResourceBytes()
+    {
+        using Stream stream = typeof(DepthShaderManager).Assembly.GetManifestResourceStream(PATH)!;
+        using MemoryStream memoryStream = new();
+        stream.CopyTo(memoryStream);
+        return memoryStream.ToArray();
     }
 }
