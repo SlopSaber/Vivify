@@ -144,5 +144,4 @@ internal class DepthShaderManager : IInitializable, IDisposable
             }
         }
     }
-
 }
