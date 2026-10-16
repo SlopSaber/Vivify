@@ -37,7 +37,11 @@ internal class SaberTrailHijacker : IHijacker<FollowedSaberTrail>
             // indicates that sirautil created an incomplete trail, lets fix it up so we can follow it
             Saber saber = saberTrail.GetComponentInParent<Saber>();
             Color color = colorManager.ColorForSaberType(saber.saberType);
+#if BEAT_SABER_1453
+            saberTrail.Setup(color, saber._movementData, saber.saberType);
+#else
             saberTrail.Setup(color, saber._movementData);
+#endif
             saberTrail.enabled = true;
             saberTrail._trailRenderer?._meshRenderer.enabled = false;
         }
