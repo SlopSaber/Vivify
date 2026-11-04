@@ -108,6 +108,10 @@ internal class AssetBundleManager : IDisposable
         ////mainBundle.Unload(false);
     }
 
+#if BEAT_SABER_1453
+    internal IEnumerable<Object> Assets => _assets.Values;
+#endif
+
     public void Dispose()
     {
         if (_mainBundle != null)

@@ -97,6 +97,13 @@
     <EmbeddedResource Include="Resources\Settings.bsml" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(GameVersion)' == '1.45.3' OR $(Configuration.EndsWith('1.45.3'))">
+    <Reference Include="Unity.Collections" HintPath="$(GameDirectory)\Beat Saber_Data\Managed\Unity.Collections.dll" />
+    <Reference Include="Unity.RenderPipelines.Core.Runtime" HintPath="$(GameDirectory)\Beat Saber_Data\Managed\Unity.RenderPipelines.Core.Runtime.dll" />
+    <Reference Include="Unity.RenderPipelines.Core.Runtime.Shared" HintPath="$(GameDirectory)\Beat Saber_Data\Managed\Unity.RenderPipelines.Core.Runtime.Shared.dll" />
+    <Reference Include="Unity.RenderPipelines.Universal.Runtime" HintPath="$(GameDirectory)\Beat Saber_Data\Managed\Unity.RenderPipelines.Universal.Runtime.dll" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="BeatSaberModdingTools.Tasks.Luna" Version="2.1.0"/>
     <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.*"/>
