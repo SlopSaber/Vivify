@@ -22,6 +22,7 @@ internal sealed class LegacyShaderRendering : IAffinity, IDisposable
 
     private readonly LegacyLightingPass? _lightingPass;
     private readonly LegacyGrabTexturePass? _grabPass;
+    private readonly LegacyExtraPassRenderPass? _extraPass;
     private readonly SiraLog _log;
 
     private bool _reportedFallback;
@@ -54,15 +55,28 @@ internal sealed class LegacyShaderRendering : IAffinity, IDisposable
                 foreach (Renderer renderer in prefab.GetComponentsInChildren<Renderer>(true))
                 {
                     renderer.GetSharedMaterials(materials);
+                    bool extraPasses = false;
                     foreach (Material sharedMaterial in materials)
                     {
                         if (sharedMaterial != null)
                         {
                             shaders.Add(sharedMaterial.shader);
+                            extraPasses |= LegacyExtraPasses.HasExtraPasses(sharedMaterial.shader);
                         }
+                    }
+
+                    if (extraPasses && !renderer.TryGetComponent(out LegacyExtraPasses _))
+                    {
+                        renderer.gameObject.AddComponent<LegacyExtraPasses>();
+                        _extraPass ??= new LegacyExtraPassRenderPass();
                     }
                 }
             }
+        }
+
+        if (_extraPass != null)
+        {
+            log.Info("Enabled additional untagged shader passes for bundled renderers.");
         }
 
         foreach (Shader shader in shaders)
@@ -117,6 +131,11 @@ internal sealed class LegacyShaderRendering : IAffinity, IDisposable
         if (_lightingPass != null)
         {
             __instance.EnqueuePass(_lightingPass);
+        }
+
+        if (_extraPass != null)
+        {
+            __instance.EnqueuePass(_extraPass);
         }
 
         if (_grabPass != null && _grabPassRequested)
