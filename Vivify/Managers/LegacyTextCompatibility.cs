@@ -51,6 +51,34 @@ internal sealed class LegacyTextCompatibility
         }
     }
 
+    // Older font assets are upgraded on first use, so instances are checked again after
+    // forcing that upgrade. Text that still has no usable material is disabled instead of
+    // throwing on every rebuild.
+    internal static int RepairInstance(GameObject instance, bool awake)
+    {
+        int disabled = 0;
+        foreach (TMP_Text text in instance.GetComponentsInChildren<TMP_Text>(true))
+        {
+            TMP_FontAsset? font = text.font;
+            if (font != null)
+            {
+                font.ReadFontAssetDefinition();
+            }
+
+            EnsureTextMaterial(text);
+            bool unusable = awake && text.gameObject.activeInHierarchy
+                ? text.font == null || text.font.material == null || text.fontSharedMaterial == null
+                : text.font != null && text.font.material == null;
+            if (unusable && text.enabled)
+            {
+                text.enabled = false;
+                disabled++;
+            }
+        }
+
+        return disabled;
+    }
+
     private static bool EnsureTextMaterial(TMP_Text text)
     {
         TMP_FontAsset? font = text.font;
@@ -76,7 +104,7 @@ internal sealed class LegacyTextCompatibility
             return false;
         }
 
-        Shader? shader = Shader.Find(DistanceFieldShader);
+        Shader? shader = Shader.Find(DistanceFieldShader) ?? FindLoadedTextShader();
         Texture2D? atlas = font.atlasTexture;
         if (shader == null || atlas == null)
         {
@@ -92,6 +120,19 @@ internal sealed class LegacyTextCompatibility
         material.SetFloat(ShaderUtilities.ID_WeightBold, font.boldStyle);
         font.material = material;
         return true;
+    }
+
+    private static Shader? FindLoadedTextShader()
+    {
+        foreach (TMP_FontAsset font in Resources.FindObjectsOfTypeAll<TMP_FontAsset>())
+        {
+            if (font != null && font.material != null && font.material.shader != null && font.material.shader.isSupported)
+            {
+                return font.material.shader;
+            }
+        }
+
+        return null;
     }
 }
 #endif

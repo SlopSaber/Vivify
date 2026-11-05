@@ -94,6 +94,13 @@ internal class InstantiatePrefab : ICustomEvent, IInitializable, IDisposable
 
             GameObject gameObject = Object.Instantiate(prefab);
             gameObject.SetActive(false);
+#if BEAT_SABER_1453
+            int disabledTexts = LegacyTextCompatibility.RepairInstance(gameObject, false);
+            if (disabledTexts > 0)
+            {
+                _log.Debug($"Disabled {disabledTexts} TextMeshPro text(s) without a usable material in [{assetName}]");
+            }
+#endif
             _loadedPrefabs.Add(data, gameObject);
         }
 
@@ -118,6 +125,13 @@ internal class InstantiatePrefab : ICustomEvent, IInitializable, IDisposable
         }
 
         gameObject.SetActive(true);
+#if BEAT_SABER_1453
+        int disabledTexts = LegacyTextCompatibility.RepairInstance(gameObject, true);
+        if (disabledTexts > 0)
+        {
+            _log.Debug($"Disabled {disabledTexts} TextMeshPro text(s) without a usable material in [{data.Asset}]");
+        }
+#endif
         Transform transform = gameObject.transform;
         data.TransformData.Apply(transform, false);
         if (_mirroredParent != null)
