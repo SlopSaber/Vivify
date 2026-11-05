@@ -18,6 +18,9 @@ internal class CameraPropertyController : MonoBehaviour
     private DepthTextureMode _cachedDepthTextureMode;
     private CameraClearFlags _cachedClearFlags;
     private Color _cachedBackgroundColor;
+#if BEAT_SABER_1453
+    private bool? _cachedRequiresDepth;
+#endif
 
     private CullingCameraController _cullingCameraController = null!;
     private BloomPrePass? _bloomPrePass;
@@ -35,6 +38,9 @@ internal class CameraPropertyController : MonoBehaviour
     {
         set
         {
+#if BEAT_SABER_1453
+            SetUniversalDepthTexture(value != null && (value.Value & UnityEngine.DepthTextureMode.Depth) != 0);
+#endif
             if (value == null)
             {
 #if !PRE_V1_37_1
@@ -124,6 +130,29 @@ internal class CameraPropertyController : MonoBehaviour
     }
 #endif
 
+#if BEAT_SABER_1453
+    // URP ignores Camera.depthTextureMode; _CameraDepthTexture is only produced when the
+    // camera's URP data requests it.
+    private void SetUniversalDepthTexture(bool required)
+    {
+        if (!TryGetComponent(out UnityEngine.Rendering.Universal.UniversalAdditionalCameraData data))
+        {
+            return;
+        }
+
+        if (required)
+        {
+            _cachedRequiresDepth ??= data.requiresDepthTexture;
+            data.requiresDepthTexture = true;
+        }
+        else if (_cachedRequiresDepth != null)
+        {
+            data.requiresDepthTexture = _cachedRequiresDepth.Value;
+            _cachedRequiresDepth = null;
+        }
+    }
+
+#endif
     private void Awake()
     {
         _camera = GetComponent<Camera>();
