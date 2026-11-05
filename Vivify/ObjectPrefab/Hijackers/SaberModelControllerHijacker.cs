@@ -136,7 +136,7 @@ internal class SaberModelControllerHijacker : IHijacker<GameObject>
                 return;
             }
 
-            hijacker._log.Warn("CustomSabersLite model not yet created, deferring renderer fetching");
+            hijacker._log.Debug("CustomSabersLite model not yet created, deferring renderer fetching");
             _hijacker = hijacker;
         }
 

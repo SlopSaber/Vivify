@@ -101,7 +101,7 @@ internal class SaberTrailHijacker : IHijacker<FollowedSaberTrail>
 
             if (saberTrails.Length == 0)
             {
-                log.Warn("CustomSabersLite trail not yet created, deferring renderer fetching");
+                log.Debug("CustomSabersLite trail not yet created, deferring renderer fetching");
                 saberTrail.gameObject.AddComponent<LiteTrailContract>().Init(this);
             }
             else

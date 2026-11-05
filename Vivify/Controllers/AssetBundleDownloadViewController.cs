@@ -77,7 +77,8 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
     public bool Init(StartStandardLevelParameters standardLevelParameters)
     {
 #if !PRE_V1_37_1
-        if (standardLevelParameters.BeatmapLevel.previewMediaData is not FileSystemPreviewMediaData fileSystemPreviewMediaData)
+        if (standardLevelParameters.BeatmapLevel == null ||
+            standardLevelParameters.BeatmapLevel.previewMediaData is not FileSystemPreviewMediaData fileSystemPreviewMediaData)
         {
             return false;
         }
