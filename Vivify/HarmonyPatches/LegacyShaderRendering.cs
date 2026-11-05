@@ -21,9 +21,12 @@ internal sealed class LegacyShaderRendering : IAffinity, IDisposable
     private static readonly ShaderTagId _lightMode = new("LightMode");
 
     private readonly LegacyLightingPass? _lightingPass;
+    private readonly LegacyGrabTexturePass? _grabPass;
     private readonly SiraLog _log;
 
     private bool _reportedFallback;
+    private volatile bool _grabPassRequested;
+    private bool _reportedGrabPass;
 
     [UsedImplicitly]
     private LegacyShaderRendering(AssetBundleManager assetBundleManager, SiraLog log)
@@ -33,6 +36,10 @@ internal sealed class LegacyShaderRendering : IAffinity, IDisposable
         {
             return;
         }
+
+        // A GrabPass is only reported by Unity when it is drawn, from a render job thread.
+        _grabPass = new LegacyGrabTexturePass();
+        Application.logMessageReceivedThreaded += OnLogMessage;
 
         HashSet<Shader> shaders = [];
         List<Material> materials = [];
@@ -73,6 +80,7 @@ internal sealed class LegacyShaderRendering : IAffinity, IDisposable
 
     public void Dispose()
     {
+        Application.logMessageReceivedThreaded -= OnLogMessage;
         _lightingPass?.Dispose();
     }
 
@@ -94,6 +102,14 @@ internal sealed class LegacyShaderRendering : IAffinity, IDisposable
         return false;
     }
 
+    private void OnLogMessage(string condition, string stackTrace, LogType type)
+    {
+        if (!_grabPassRequested && type == LogType.Error && condition.StartsWith("ShaderLab::GrabPasses", StringComparison.Ordinal))
+        {
+            _grabPassRequested = true;
+        }
+    }
+
     [AffinityPrefix]
     [AffinityPatch(typeof(ScriptableRenderer), "AddRenderPasses")]
     private void AddLightingPass(ScriptableRenderer __instance)
@@ -101,6 +117,16 @@ internal sealed class LegacyShaderRendering : IAffinity, IDisposable
         if (_lightingPass != null)
         {
             __instance.EnqueuePass(_lightingPass);
+        }
+
+        if (_grabPass != null && _grabPassRequested)
+        {
+            __instance.EnqueuePass(_grabPass);
+            if (!_reportedGrabPass)
+            {
+                _reportedGrabPass = true;
+                _log.Info("Bundled shaders use GrabPass; providing the camera opaque texture as _GrabTexture.");
+            }
         }
     }
 

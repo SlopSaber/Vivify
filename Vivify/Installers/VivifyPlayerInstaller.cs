@@ -28,6 +28,7 @@ internal class VivifyPlayerInstaller : Installer
         Container.BindInterfacesAndSelfTo<PrefabManager>().AsSingle();
 #if BEAT_SABER_1453
         Container.BindInterfacesTo<LegacyShaderRendering>().AsSingle();
+        Container.Bind<LegacyTextCompatibility>().AsSingle().NonLazy();
 #endif
 
         Container.BindInterfacesAndSelfTo<NotePrefabManager>().AsSingle();

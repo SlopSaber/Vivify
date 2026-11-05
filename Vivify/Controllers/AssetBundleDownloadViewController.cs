@@ -131,7 +131,7 @@ internal class AssetBundleDownloadViewController : BSMLResourceViewController, I
         }
         else
         {
-            _log.Error($"[{path}] not found, attempting to download remotely");
+            _log.Info($"[{path}] not found, attempting to download remotely");
             uint checksum = assetBundleChecksum.Value;
             _doAbort = false;
             _downloadFinished = false;

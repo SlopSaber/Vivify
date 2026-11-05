@@ -82,6 +82,11 @@ internal class SetAnimatorProperty : ICustomEvent
                         {
                             foreach (Animator animator in animators)
                             {
+                                if (animator == null)
+                                {
+                                    continue;
+                                }
+
                                 animator.SetBool(name, animated.PointDefinition.Interpolate(1) >= 1);
                             }
                         }
@@ -101,6 +106,11 @@ internal class SetAnimatorProperty : ICustomEvent
                     {
                         foreach (Animator animator in animators)
                         {
+                            if (animator == null)
+                            {
+                                continue;
+                            }
+
                             animator.SetBool(name, (bool)value);
                         }
                     }
@@ -114,6 +124,11 @@ internal class SetAnimatorProperty : ICustomEvent
                         {
                             foreach (Animator animator in animators)
                             {
+                                if (animator == null)
+                                {
+                                    continue;
+                                }
+
                                 animator.SetFloat(name, animated.PointDefinition.Interpolate(1));
                             }
                         }
@@ -133,6 +148,11 @@ internal class SetAnimatorProperty : ICustomEvent
                     {
                         foreach (Animator animator in animators)
                         {
+                            if (animator == null)
+                            {
+                                continue;
+                            }
+
                             animator.SetFloat(name, Convert.ToSingle(value));
                         }
                     }
@@ -146,6 +166,11 @@ internal class SetAnimatorProperty : ICustomEvent
                         {
                             foreach (Animator animator in animators)
                             {
+                                if (animator == null)
+                                {
+                                    continue;
+                                }
+
                                 animator.SetFloat(name, animated.PointDefinition.Interpolate(1));
                             }
                         }
@@ -165,6 +190,11 @@ internal class SetAnimatorProperty : ICustomEvent
                     {
                         foreach (Animator animator in animators)
                         {
+                            if (animator == null)
+                            {
+                                continue;
+                            }
+
                             animator.SetFloat(name, Convert.ToSingle(value));
                         }
                     }
@@ -175,6 +205,11 @@ internal class SetAnimatorProperty : ICustomEvent
                     bool trigger = (bool)value;
                     foreach (Animator animator in animators)
                     {
+                        if (animator == null)
+                        {
+                            continue;
+                        }
+
                         if (trigger)
                         {
                             animator.SetTrigger(name);
@@ -217,6 +252,11 @@ internal class SetAnimatorProperty : ICustomEvent
                         bool value = points.Interpolate(time) >= 1;
                         foreach (Animator animator in animators)
                         {
+                            if (animator == null)
+                            {
+                                continue;
+                            }
+
                             animator.SetBool(name, value);
                         }
 
@@ -228,6 +268,11 @@ internal class SetAnimatorProperty : ICustomEvent
                         float value = points.Interpolate(time);
                         foreach (Animator animator in animators)
                         {
+                            if (animator == null)
+                            {
+                                continue;
+                            }
+
                             animator.SetFloat(name, value);
                         }
 
@@ -239,6 +284,11 @@ internal class SetAnimatorProperty : ICustomEvent
                         float value = points.Interpolate(time);
                         foreach (Animator animator in animators)
                         {
+                            if (animator == null)
+                            {
+                                continue;
+                            }
+
                             animator.SetInteger(name, (int)value);
                         }
 
