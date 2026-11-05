@@ -102,6 +102,13 @@ internal sealed class LegacyExtraPasses : MonoBehaviour
         _materials.Clear();
         if (_draws.Count > 0)
         {
+            // DrawRenderer only receives the particle system's combined mesh, which instanced mesh
+            // particles never build.
+            if (_renderer is ParticleSystemRenderer particles)
+            {
+                particles.enableGPUInstancing = false;
+            }
+
             Active.Add(this);
         }
     }
