@@ -12,7 +12,7 @@ namespace Vivify.PostProcessing;
 internal sealed class LegacyExtraPasses : MonoBehaviour
 {
     private static readonly ShaderTagId _lightMode = new("LightMode");
-    private static readonly Dictionary<Shader, int[]> _extraPasses = new();
+    private static readonly Dictionary<Shader, PassPlan[]> _extraPasses = new();
     private static readonly List<Material> _materials = [];
 
     private readonly List<Draw> _draws = [];
@@ -26,25 +26,45 @@ internal sealed class LegacyExtraPasses : MonoBehaviour
 
     internal static bool HasExtraPasses(Shader? shader) => shader != null && GetExtraPasses(shader).Length > 0;
 
-    private static int[] GetExtraPasses(Shader shader)
+    internal static void ClearCache() => _extraPasses.Clear();
+
+    // URP already draws the first untagged pass. GrabPass passes are never drawn; the passes after one
+    // sample the texture it would have captured.
+    private static PassPlan[] GetExtraPasses(Shader shader)
     {
-        if (_extraPasses.TryGetValue(shader, out int[] passes))
+        if (_extraPasses.TryGetValue(shader, out PassPlan[] passes))
         {
             return passes;
         }
 
-        List<int> untagged = [];
+        List<PassPlan> plans = [];
+        List<string> grabs = [];
+        bool first = true;
         int count = shader.subshaderCount > 0 ? shader.GetPassCountInSubshader(0) : 0;
         for (int pass = 0; pass < count; pass++)
         {
             string mode = shader.FindPassTagValue(0, pass, _lightMode).name;
-            if (string.IsNullOrEmpty(mode) || string.Equals(mode, "Always", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(mode) && !string.Equals(mode, "Always", StringComparison.OrdinalIgnoreCase))
             {
-                untagged.Add(pass);
+                continue;
             }
+
+            if (LegacyGrabPasses.TryGetTextureName(shader, pass, out string grabTexture))
+            {
+                if (!grabs.Contains(grabTexture))
+                {
+                    grabs.Add(grabTexture);
+                }
+            }
+            else if (!first)
+            {
+                plans.Add(new PassPlan(pass, grabs.Count > 0 ? grabs.ToArray() : null));
+            }
+
+            first = false;
         }
 
-        passes = untagged.Count > 1 ? untagged.GetRange(1, untagged.Count - 1).ToArray() : [];
+        passes = plans.ToArray();
         _extraPasses[shader] = passes;
         return passes;
     }
@@ -73,9 +93,9 @@ internal sealed class LegacyExtraPasses : MonoBehaviour
                 continue;
             }
 
-            foreach (int pass in GetExtraPasses(material.shader))
+            foreach (PassPlan plan in GetExtraPasses(material.shader))
             {
-                _draws.Add(new Draw(material, Math.Min(i, Math.Max(submeshes - 1, 0)), pass));
+                _draws.Add(new Draw(material, Math.Min(i, Math.Max(submeshes - 1, 0)), plan.Pass, plan.GrabTextures));
             }
         }
 
@@ -96,12 +116,26 @@ internal sealed class LegacyExtraPasses : MonoBehaviour
         internal readonly Material Material;
         internal readonly int Submesh;
         internal readonly int Pass;
+        internal readonly string[]? GrabTextures;
 
-        internal Draw(Material material, int submesh, int pass)
+        internal Draw(Material material, int submesh, int pass, string[]? grabTextures)
         {
             Material = material;
             Submesh = submesh;
             Pass = pass;
+            GrabTextures = grabTextures;
+        }
+    }
+
+    private readonly struct PassPlan
+    {
+        internal readonly int Pass;
+        internal readonly string[]? GrabTextures;
+
+        internal PassPlan(int pass, string[]? grabTextures)
+        {
+            Pass = pass;
+            GrabTextures = grabTextures;
         }
     }
 }

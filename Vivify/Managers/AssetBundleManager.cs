@@ -63,6 +63,9 @@ internal class AssetBundleManager : IDisposable
             ((CustomBeatmapLevel)customDifficultyBeatmap.level).customLevelPath,
             BUNDLE_FILE);
 #endif
+#if BEAT_SABER_1453
+        BundlePath = path;
+#endif
         if (!File.Exists(path))
         {
             _log.Error($"[{BUNDLE_FILE}] not found");
@@ -110,6 +113,8 @@ internal class AssetBundleManager : IDisposable
 
 #if BEAT_SABER_1453
     internal IEnumerable<Object> Assets => _assets.Values;
+
+    internal string? BundlePath { get; }
 #endif
 
     public void Dispose()
