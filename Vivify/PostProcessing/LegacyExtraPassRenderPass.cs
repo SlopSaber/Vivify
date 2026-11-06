@@ -13,11 +13,16 @@ namespace Vivify.PostProcessing;
 internal sealed class LegacyExtraPassRenderPass : ScriptableRenderPass
 {
     private static readonly Dictionary<string, (int Texture, int TexelSize)> _propertyIds = new();
+    private static readonly List<ShaderTagId> _shaderTags = [new("SRPDefaultUnlit"), new("UniversalForward"), new("UniversalForwardOnly"), new("Always"), new("ForwardBase")];
 
     private readonly List<(Renderer Renderer, LegacyExtraPasses.Draw Draw)> _plainDraws = [];
     private readonly List<(Renderer Renderer, LegacyExtraPasses.Draw Draw)> _grabDraws = [];
     private readonly List<int> _grabTextures = [];
     private readonly List<int> _grabTexelSizes = [];
+    private readonly List<(uint Layer, LegacyExtraPasses.Draw Draw)> _plainParticles = [];
+    private readonly List<(uint Layer, LegacyExtraPasses.Draw Draw)> _grabParticles = [];
+    private readonly HashSet<(uint Layer, int Pass)> _particleKeys = [];
+    private readonly Plane[] _frustum = new Plane[6];
 
     internal LegacyExtraPassRenderPass()
     {
@@ -26,7 +31,8 @@ internal sealed class LegacyExtraPassRenderPass : ScriptableRenderPass
 
     public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
     {
-        if (LegacyExtraPasses.Active.Count == 0 || !CollectDraws())
+        UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+        if (LegacyExtraPasses.Active.Count == 0 || !CollectDraws(cameraData.camera))
         {
             return;
         }
@@ -34,12 +40,12 @@ internal sealed class LegacyExtraPassRenderPass : ScriptableRenderPass
         UniversalResourceData resources = frameData.Get<UniversalResourceData>();
         TextureHandle color = resources.activeColorTexture;
         TextureHandle depth = resources.activeDepthTexture;
-        if (_plainDraws.Count > 0)
+        if (_plainDraws.Count > 0 || _plainParticles.Count > 0)
         {
-            AddDrawPass(renderGraph, "Vivify legacy extra passes", color, depth, _plainDraws, TextureHandle.nullHandle);
+            AddDrawPass(renderGraph, frameData, "Vivify legacy extra passes", color, depth, _plainDraws, _plainParticles, TextureHandle.nullHandle);
         }
 
-        if (_grabDraws.Count == 0)
+        if (_grabDraws.Count == 0 && _grabParticles.Count == 0)
         {
             return;
         }
@@ -67,32 +73,60 @@ internal sealed class LegacyExtraPassRenderPass : ScriptableRenderPass
                 Blitter.BlitTexture(context.cmd, copyData.Source, new Vector4(1, 1, 0, 0), 0, false));
         }
 
-        AddDrawPass(renderGraph, "Vivify legacy grab extra passes", color, depth, _grabDraws, grab, new Vector4(1f / desc.width, 1f / desc.height, desc.width, desc.height));
+        AddDrawPass(renderGraph, frameData, "Vivify legacy grab extra passes", color, depth, _grabDraws, _grabParticles, grab, new Vector4(1f / desc.width, 1f / desc.height, desc.width, desc.height));
     }
 
-    private bool CollectDraws()
+    private bool CollectDraws(Camera camera)
     {
         _plainDraws.Clear();
         _grabDraws.Clear();
         _grabTextures.Clear();
         _grabTexelSizes.Clear();
+        _plainParticles.Clear();
+        _grabParticles.Clear();
+        _particleKeys.Clear();
+        GeometryUtility.CalculateFrustumPlanes(camera.cullingMatrix, _frustum);
         foreach (LegacyExtraPasses extra in LegacyExtraPasses.Active)
         {
             Renderer? renderer = extra == null ? null : extra.Renderer;
-            if (renderer == null || !renderer.enabled || !renderer.isVisible)
+            if (renderer == null || !renderer.enabled || renderer.forceRenderingOff || !renderer.isVisible ||
+                (camera.cullingMask & (1 << renderer.gameObject.layer)) == 0 ||
+                (!camera.stereoEnabled && !GeometryUtility.TestPlanesAABB(_frustum, renderer.bounds)))
             {
                 continue;
             }
 
             foreach (LegacyExtraPasses.Draw draw in extra!.Draws)
             {
-                if (draw.GrabTextures == null)
+                uint particleLayer = extra.ParticleLayer;
+                if (particleLayer != 0 && !_particleKeys.Add((particleLayer, draw.Pass)))
                 {
-                    _plainDraws.Add((renderer, draw));
                     continue;
                 }
 
-                _grabDraws.Add((renderer, draw));
+                if (draw.GrabTextures == null)
+                {
+                    if (particleLayer != 0)
+                    {
+                        _plainParticles.Add((particleLayer, draw));
+                    }
+                    else
+                    {
+                        _plainDraws.Add((renderer, draw));
+                    }
+
+                    continue;
+                }
+
+                if (particleLayer != 0)
+                {
+                    _grabParticles.Add((particleLayer, draw));
+                }
+                else
+                {
+                    _grabDraws.Add((renderer, draw));
+                }
+
                 foreach (string name in draw.GrabTextures)
                 {
                     if (!_propertyIds.TryGetValue(name, out (int Texture, int TexelSize) ids))
@@ -110,20 +144,46 @@ internal sealed class LegacyExtraPassRenderPass : ScriptableRenderPass
             }
         }
 
-        return _plainDraws.Count > 0 || _grabDraws.Count > 0;
+        return _plainDraws.Count > 0 || _grabDraws.Count > 0 || _plainParticles.Count > 0 || _grabParticles.Count > 0;
     }
 
     private void AddDrawPass(
         RenderGraph renderGraph,
+        ContextContainer frameData,
         string name,
         TextureHandle color,
         TextureHandle depth,
         List<(Renderer Renderer, LegacyExtraPasses.Draw Draw)> draws,
+        List<(uint Layer, LegacyExtraPasses.Draw Draw)> particles,
         TextureHandle grab,
         Vector4 texelSize = default)
     {
         using IRasterRenderGraphBuilder builder = renderGraph.AddRasterRenderPass(name, out DrawData data);
         data.Draws = draws;
+        data.Particles.Clear();
+        foreach ((uint layer, LegacyExtraPasses.Draw draw) in particles)
+        {
+            UniversalRenderingData renderingData = frameData.Get<UniversalRenderingData>();
+            UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+            DrawingSettings settings = RenderingUtils.CreateDrawingSettings(
+                _shaderTags,
+                renderingData,
+                cameraData,
+                frameData.Get<UniversalLightData>(),
+                draw.Material.renderQueue > 2500 ? SortingCriteria.CommonTransparent : cameraData.defaultOpaqueSortFlags);
+
+            // Selecting the same shader's explicit pass keeps each source material's properties and
+            // native particle instance buffers. DrawRenderer cannot submit those buffers.
+            settings.overrideShader = draw.Material.shader;
+            settings.overrideShaderPassIndex = draw.Pass;
+            settings.enableInstancing = true;
+            RendererListParams parameters = new(renderingData.cullResults, settings,
+                new FilteringSettings(RenderQueueRange.all, cameraData.camera.cullingMask, layer));
+            RendererListHandle list = renderGraph.CreateRendererList(parameters);
+            data.Particles.Add(list);
+            builder.UseRendererList(list);
+        }
+
         data.TexelSizes = grab.IsValid() ? _grabTexelSizes : null;
         data.TexelSize = texelSize;
         builder.SetRenderAttachment(color, 0);
@@ -153,6 +213,11 @@ internal sealed class LegacyExtraPassRenderPass : ScriptableRenderPass
                     cmd.DrawRenderer(renderer, draw.Material, draw.Submesh, draw.Pass);
                 }
             }
+
+            foreach (RendererListHandle particles in drawData.Particles)
+            {
+                cmd.DrawRendererList(particles);
+            }
         });
     }
 
@@ -163,6 +228,8 @@ internal sealed class LegacyExtraPassRenderPass : ScriptableRenderPass
 
     private sealed class DrawData
     {
+        internal List<RendererListHandle> Particles { get; } = [];
+
         internal List<(Renderer Renderer, LegacyExtraPasses.Draw Draw)>? Draws { get; set; }
 
         internal List<int>? TexelSizes { get; set; }

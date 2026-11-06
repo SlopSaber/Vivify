@@ -14,9 +14,15 @@ internal sealed class LegacyExtraPasses : MonoBehaviour
     private static readonly ShaderTagId _lightMode = new("LightMode");
     private static readonly Dictionary<Shader, PassPlan[]> _extraPasses = new();
     private static readonly List<Material> _materials = [];
+    private static readonly Dictionary<(Shader Shader, bool Transparent), uint> _particleLayers = new();
+
+    private static uint _availableParticleLayers;
+    private static bool _reportedParticleFallback;
 
     private readonly List<Draw> _draws = [];
     private Renderer? _renderer;
+    private ParticleSystemRenderer? _particles;
+    private bool _restoreInstancing;
 
     internal static HashSet<LegacyExtraPasses> Active { get; } = [];
 
@@ -24,9 +30,63 @@ internal sealed class LegacyExtraPasses : MonoBehaviour
 
     internal IReadOnlyList<Draw> Draws => _draws;
 
+    internal uint ParticleLayer { get; private set; }
+
     internal static bool HasExtraPasses(Shader? shader) => shader != null && GetExtraPasses(shader).Length > 0;
 
-    internal static void ClearCache() => _extraPasses.Clear();
+    internal static void ClearCache()
+    {
+        _extraPasses.Clear();
+        _particleLayers.Clear();
+        _reportedParticleFallback = false;
+        uint used = 0;
+        foreach (Renderer renderer in Resources.FindObjectsOfTypeAll<Renderer>())
+        {
+            used |= renderer.renderingLayerMask;
+        }
+
+        foreach (Light light in Resources.FindObjectsOfTypeAll<Light>())
+        {
+            // An all-layers light already affects every renderer with a nonzero mask.
+            if (light.renderingLayerMask != -1)
+            {
+                used |= unchecked((uint)light.renderingLayerMask);
+            }
+        }
+
+        _availableParticleLayers = ~used;
+    }
+
+    private static uint GetParticleLayer(Material material)
+    {
+        (Shader Shader, bool Transparent) key = (material.shader, material.renderQueue > 2500);
+        if (_particleLayers.TryGetValue(key, out uint layer))
+        {
+            return layer;
+        }
+
+        if (_availableParticleLayers == 0)
+        {
+            if (!_reportedParticleFallback)
+            {
+                _reportedParticleFallback = true;
+                Plugin.Log.Warn("No unused rendering layer for instanced legacy particle passes; using combined meshes.");
+            }
+
+            return 0;
+        }
+
+        layer = 1u << 31;
+        while ((_availableParticleLayers & layer) == 0)
+        {
+            layer >>= 1;
+        }
+
+        _availableParticleLayers &= ~layer;
+        _particleLayers.Add(key, layer);
+        Plugin.Log.Debug($"Using native instanced legacy passes for [{material.shader.name}].");
+        return layer;
+    }
 
     // URP already draws the first untagged pass. GrabPass passes are never drawn; the passes after one
     // sample the texture it would have captured.
@@ -99,23 +159,49 @@ internal sealed class LegacyExtraPasses : MonoBehaviour
             }
         }
 
-        _materials.Clear();
         if (_draws.Count > 0)
         {
-            // DrawRenderer only receives the particle system's combined mesh, which instanced mesh
-            // particles never build.
-            if (_renderer is ParticleSystemRenderer particles)
+            if (_renderer is ParticleSystemRenderer particles && particles.enableGPUInstancing)
             {
-                particles.enableGPUInstancing = false;
+                _particles = particles;
+                if (particles.renderMode == ParticleSystemRenderMode.Mesh && _materials.Count == 1 &&
+                    particles.renderingLayerMask != 0)
+                {
+                    ParticleLayer = GetParticleLayer(_materials[0]);
+                }
+
+                if (ParticleLayer != 0)
+                {
+                    particles.renderingLayerMask |= ParticleLayer;
+                }
+                else
+                {
+                    _restoreInstancing = true;
+                    particles.enableGPUInstancing = false;
+                }
             }
 
             Active.Add(this);
         }
+
+        _materials.Clear();
     }
 
     private void OnDisable()
     {
         Active.Remove(this);
+        if (_particles != null)
+        {
+            _particles.renderingLayerMask &= ~ParticleLayer;
+            if (_restoreInstancing)
+            {
+                _particles.enableGPUInstancing = true;
+            }
+        }
+
+        ParticleLayer = 0;
+        _particles = null;
+        _restoreInstancing = false;
     }
 
     internal readonly struct Draw
